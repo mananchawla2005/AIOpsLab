@@ -1,7 +1,8 @@
 """Convert collected snapshots into examples of raw logs + options + label.
 
-Logs are the unmodified `kubectl logs` output of unhealthy pods (the collector
-skips healthy pods). Each line is only prefixed with its pod name.
+Logs are the unmodified `kubectl logs` output of every pod (healthy ones included,
+so a retrieval step has to find the relevant lines), followed by the cluster's
+events. Pod log lines are only prefixed with the pod name.
 
 Usage:
     python scripts/fault_dataset/to_text.py data/fault_dataset.jsonl data/text_dataset.jsonl
@@ -14,11 +15,10 @@ OPTIONS = ["do_nothing", "restart_pod", "scale_up", "rollback_deployment", "drai
 
 
 def raw_logs(snap):
-    return "\n".join(
-        f"[{p['name']}] {line}"
-        for p in snap["pods"]
-        for line in p["logs"].strip().splitlines()
-    )
+    lines = [f"[{p['name']}] {line}" for p in snap["pods"] for line in p["logs"].strip().splitlines()]
+    for e in snap["events"] + snap["node_events"]:
+        lines.append(f"[event {e['ts']}] {e['type']} {e['reason']} {e['obj']}: {e['msg']}")
+    return "\n".join(lines)
 
 
 def render(rec):

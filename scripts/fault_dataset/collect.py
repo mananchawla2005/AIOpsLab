@@ -58,16 +58,13 @@ def wait_healthy(timeout=240):
 
 def snapshot(since):
     pods = []
-    bad_nodes = {n["metadata"]["name"] for n in kjson("get nodes")["items"]
-                 if not any(c["type"] == "Ready" and c["status"] == "True" for c in n["status"]["conditions"])}
     for p in kjson(f"get pods -n {NS}")["items"]:
         cs = p["status"].get("containerStatuses", [])
         waiting = [c["state"]["waiting"]["reason"] for c in cs if "waiting" in c["state"]]
         name = p["metadata"]["name"]
         ready = bool(cs) and all(c["ready"] for c in cs)
-        # raw logs, unhealthy pods only: not Ready, waiting in a bad state, or on a NotReady node
-        unhealthy = not ready or bool(waiting) or p["spec"].get("nodeName") in bad_nodes
-        logs = sh(f"kubectl logs {name} -n {NS} --tail=25 --all-containers 2>&1", 15) if unhealthy else ""
+        # raw logs from every pod, healthy ones included: a retrieval step must learn which lines matter
+        logs = sh(f"kubectl logs {name} -n {NS} --tail=25 --all-containers 2>&1", 15)
         pods.append({
             "name": name,
             "service": p["metadata"].get("labels", {}).get("io.kompose.service", name),
@@ -76,7 +73,7 @@ def snapshot(since):
             "ready": ready,
             "restarts": sum(c["restartCount"] for c in cs),
             "waiting": waiting,
-            "logs": logs[-6000:],
+            "logs": logs[-4000:],
         })
     nodes = [{
         "name": n["metadata"]["name"],
@@ -92,10 +89,11 @@ def snapshot(since):
         ts = e.get("lastTimestamp") or e.get("eventTime") or e["metadata"]["creationTimestamp"]
         return ts >= since
 
-    events = [{"type": e.get("type"), "reason": e.get("reason"), "obj": e["involvedObject"]["name"],
-               "msg": e.get("message", "")[:160]}
+    events = [{"ts": e.get("lastTimestamp") or e["metadata"]["creationTimestamp"], "type": e.get("type"),
+               "reason": e.get("reason"), "obj": e["involvedObject"]["name"], "msg": e.get("message", "")}
               for e in kjson(f"get events -n {NS}")["items"] if recent(e)]
-    node_events = [{"reason": e.get("reason"), "obj": e["involvedObject"]["name"]}
+    node_events = [{"ts": e.get("lastTimestamp") or e["metadata"]["creationTimestamp"], "type": e.get("type"),
+                    "reason": e.get("reason"), "obj": e["involvedObject"]["name"], "msg": e.get("message", "")}
                    for e in kjson("get events -A --field-selector involvedObject.kind=Node")["items"]
                    if recent(e)]
     return {"pods": pods, "nodes": nodes, "deployments": deps,
