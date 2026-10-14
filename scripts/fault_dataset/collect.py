@@ -26,7 +26,10 @@ WORKERS = ["kind-worker", "kind-worker2"]
 
 
 def sh(cmd, timeout=120):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:  # e.g. kubectl logs to a node that lost its network
+        return f"[ERROR] command timed out after {timeout}s: {cmd.split(' 2>')[0]}"
     return r.stdout if r.returncode == 0 else r.stdout + r.stderr
 
 
