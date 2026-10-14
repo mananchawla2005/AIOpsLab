@@ -9,7 +9,24 @@ from aiopslab.session import SessionItem
 
 # Constants
 token_model = "gpt-3.5-turbo"
-tokenizer = tiktoken.encoding_for_model(token_model)
+_tokenizer = None
+
+
+class _FallbackTokenizer:
+    """Rough token estimate used when tiktoken cannot fetch its encoding (offline)."""
+
+    def encode(self, text, **_):
+        return text.split()
+
+
+def _get_tokenizer():
+    global _tokenizer
+    if _tokenizer is None:
+        try:
+            _tokenizer = tiktoken.encoding_for_model(token_model)
+        except Exception:
+            _tokenizer = _FallbackTokenizer()
+    return _tokenizer
 
 
 def num_steps_taken(trace: list[SessionItem]) -> int:
@@ -22,7 +39,7 @@ def out_tokens(trace: list[SessionItem]) -> int:
     # NOTE: not dollar value, since depends on Agent's model
 
     agent_steps = "".join([item.content for item in trace if item.role == "assistant"])
-    return len(tokenizer.encode(agent_steps, disallowed_special=()))
+    return len(_get_tokenizer().encode(agent_steps, disallowed_special=()))
 
 
 def in_tokens(trace: list[SessionItem]) -> int:
@@ -30,7 +47,7 @@ def in_tokens(trace: list[SessionItem]) -> int:
     # NOTE: not dollar value, since depends on Agent's model
 
     user_steps = "".join([item.content for item in trace if item.role != "assistant"])
-    return len(tokenizer.encode(user_steps))
+    return len(_get_tokenizer().encode(user_steps))
 
 
 def is_exact_match(pred: int | str | list, target: int | str | list) -> bool:
