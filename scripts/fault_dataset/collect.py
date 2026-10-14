@@ -58,14 +58,16 @@ def wait_healthy(timeout=240):
 
 def snapshot(since):
     pods = []
+    bad_nodes = {n["metadata"]["name"] for n in kjson("get nodes")["items"]
+                 if not any(c["type"] == "Ready" and c["status"] == "True" for c in n["status"]["conditions"])}
     for p in kjson(f"get pods -n {NS}")["items"]:
         cs = p["status"].get("containerStatuses", [])
         waiting = [c["state"]["waiting"]["reason"] for c in cs if "waiting" in c["state"]]
         name = p["metadata"]["name"]
         ready = bool(cs) and all(c["ready"] for c in cs)
-        logs = ""
-        if not ready or any(c["restartCount"] for c in cs):
-            logs = sh(f"kubectl logs {name} -n {NS} --tail=15 --all-containers 2>&1", 30)
+        # raw logs, unhealthy pods only: not Ready, waiting in a bad state, or on a NotReady node
+        unhealthy = not ready or bool(waiting) or p["spec"].get("nodeName") in bad_nodes
+        logs = sh(f"kubectl logs {name} -n {NS} --tail=25 --all-containers 2>&1", 15) if unhealthy else ""
         pods.append({
             "name": name,
             "service": p["metadata"].get("labels", {}).get("io.kompose.service", name),
@@ -74,7 +76,7 @@ def snapshot(since):
             "ready": ready,
             "restarts": sum(c["restartCount"] for c in cs),
             "waiting": waiting,
-            "logs": logs[-1500:],
+            "logs": logs[-6000:],
         })
     nodes = [{
         "name": n["metadata"]["name"],
